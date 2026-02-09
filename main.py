@@ -2,7 +2,6 @@
 import argparse
 import sys
 import time
-
 import cv2 as cv
 
 # Importa tu librería (asegúrate de que vision.py esté en el mismo folder que este main.py)
@@ -118,3 +117,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
