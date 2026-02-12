@@ -14,6 +14,7 @@ MAX_MATCHES_DRAW = 75
 def compute_template_features(detector, img_bgr):
     """Extrae características de la imagen template."""
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    # gray = cv2.GaussianBlur(gray, (7, 7), 1.4)
     kp, des = detector.detectAndCompute(gray, None)
     return gray, kp, des
 
