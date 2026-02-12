@@ -1,11 +1,11 @@
 import cv2
 import numpy as np
-import time
+import time 
 from collections import deque
 
 def main():
     vid = cv2.VideoCapture(0)
-    template_path = r"vision\rasp\rubik.png"
+    template_path = r"Screenshot 2026-02-09 210243.png"
     
     # Cargar template original
     tpl0 = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
