@@ -5,15 +5,24 @@ import time
 # Configuración
 WIN_NAME = "Camera Matching"
 CAM_INDEX = 0
+<<<<<<< HEAD
 MIN_MATCH = 8  # Mínimo de matches para considerar detección válida
 MAX_FEATURES = 3000
 RATIO_THRESHOLD = 0.90  # Más restrictivo para mejores matches
 RANSAC_THRESHOLD = 3.0
 MAX_MATCHES_DRAW = 50
+=======
+MIN_MATCH = 20  # Mínimo de matches para considerar detección válida
+MAX_FEATURES = 2000
+RATIO_THRESHOLD = 0.75  # Más restrictivo para mejores matches
+RANSAC_THRESHOLD = 5.0
+MAX_MATCHES_DRAW = 75
+>>>>>>> b3084dcb9112fbc43f330f4da2f56b8dd3229735
 
 def compute_template_features(detector, img_bgr):
     """Extrae características de la imagen template."""
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    # gray = cv2.GaussianBlur(gray, (7, 7), 1.4)
     kp, des = detector.detectAndCompute(gray, None)
     return gray, kp, des
 
@@ -22,13 +31,13 @@ def create_detector():
     return cv2.ORB_create(
         nfeatures=MAX_FEATURES,
         scaleFactor=1.2,
-        nlevels=8,
+        nlevels=10,
         edgeThreshold=15,
         firstLevel=0,
         WTA_K=2,
-        scoreType=cv2.ORB_HARRIS_SCORE,
+        scoreType=cv2.ORB_FAST_SCORE,
         patchSize=31,
-        fastThreshold=20
+        fastThreshold=30
     )
 
 def create_matcher():
@@ -39,7 +48,7 @@ def create_matcher():
         key_size=20,      # Aumentado para mejor precisión
         multi_probe_level=2
     )
-    search_params = dict(checks=100)  # Aumentado para mejor calidad
+    search_params = dict(checks=200)  # Aumentado para mejor calidad
     return cv2.FlannBasedMatcher(index_params, search_params)
 
 def apply_ratio_test(knn_matches, ratio=0.75):
