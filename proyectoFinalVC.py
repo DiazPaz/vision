@@ -47,6 +47,7 @@ def open_serial(port):
         return None
     try:
         s = serial.Serial(port, BAUDRATE, timeout=0.05)
+        time.sleep(2)  # Esperar reset de Arduino
         print(f"UART abierto: {port}")
         return s
     except Exception as e:
@@ -107,24 +108,33 @@ def detect_color(frame_bgr):
 
     return name, bbox, area
 
+# ✅ CORRECCIÓN 1: Agregar \n y manejar "none"
 def move_GPIOs(color):
     if not port:
         print("Port error!")
         return
     
-    if color == "white":
-        port.write(("WHITE\n").encode())   # ← Agregar \n
-    elif color == "blue":
-        port.write(("BLUE\n").encode())
-    elif color == "red":
-        port.write(("RED\n").encode())
-    elif color == "green":
-        port.write(("GREEN\n").encode())
+    try:
+        if color == "white":
+            port.write(b"WHITE\n")  # ← Usar bytes directamente con \n
+        elif color == "blue":
+            port.write(b"BLUE\n")
+        elif color == "red":
+            port.write(b"RED\n")
+        elif color == "green":
+            port.write(b"GREEN\n")
+        elif color == "none":
+            port.write(b"STOP\n")  # ← AGREGAR STOP para none
+        
+        port.flush()  # ← Asegurar envío inmediato
+    except Exception as e:
+        print(f"Error enviando comando: {e}")
+
 
 def annotate(frame, color, bbox, area, stable_count):
     out = frame.copy()
     move = MOVE_BY_COLOR.get(color, "—")
-    move_GPIOs(color)
+    # ✅ NO llamar move_GPIOs aquí - se llama en main()
 
     txt1 = f"Color: {color} | Area: {int(area)} | Stable: {stable_count}"
     txt2 = f"Movimiento: {move}"
@@ -153,6 +163,7 @@ def main():
     last_color = "none"
     stable_count = 0
     last_save_t = 0.0
+    last_sent_color = None  # ✅ CORRECCIÓN 2: Evitar envíos duplicados
 
     print("Listo. Presiona 'q' para salir.")
     print("Tip: usa hojas o algo.\n")
@@ -175,9 +186,18 @@ def main():
             last_color = "none"
             stable_count = 0
 
-        # "decisión" solo imprime cuando es estable
-        if color != "none" and stable_count == STABLE_FRAMES:
-            print(f"[DECISION] {color.upper()} -> {MOVE_BY_COLOR[color]}")
+        # ✅ CORRECCIÓN 3: Enviar comando solo cuando cambia y es estable
+        if stable_count >= STABLE_FRAMES:
+            if color != last_sent_color:
+                move_GPIOs(color)
+                last_sent_color = color
+                print(f"[COMANDO] Enviado: {color.upper()} -> {MOVE_BY_COLOR[color]}")
+        
+        # Si perdemos estabilidad, enviar STOP
+        elif stable_count < STABLE_FRAMES and last_sent_color != "none":
+            move_GPIOs("none")
+            last_sent_color = "none"
+            print(f"[COMANDO] Enviado: STOP (perdida de estabilidad)")
 
         # guardar evidencia
         t = time.time()
@@ -196,6 +216,11 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+    # ✅ CORRECCIÓN 4: Detener motores al salir
+    if port:
+        move_GPIOs("none")
+        port.close()
+        
     cap.release()
     cv2.destroyAllWindows()
 
