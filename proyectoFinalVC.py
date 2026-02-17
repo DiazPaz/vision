@@ -2,8 +2,11 @@ import os
 import cv2
 import time
 import numpy as np
+import serial
 from datetime import datetime
 
+UART_port = "/dev/ttyUSB0"
+BAUDRATE = 115200
 
 CAM_INDEX = 0
 FRAME_W, FRAME_H = 640, 480
@@ -38,6 +41,19 @@ MOVE_BY_COLOR = {
     "blue":  "GIRAR IZQUIERDA (L)",
     "none":  "DETENER (S)"
 }
+
+def open_serial(port):
+    if not port:
+        return None
+    try:
+        s = serial.Serial(port, BAUDRATE, timeout=0.05)
+        print(f"UART abierto: {port}")
+        return s
+    except Exception as e:
+        print(f"Error abriendo UART {port}: {e}")
+        return None
+    
+port = open_serial(UART_port)
 
 def now_stamp():
     return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -91,9 +107,25 @@ def detect_color(frame_bgr):
 
     return name, bbox, area
 
+def move_GPIOs(color):
+    if not port:
+        print("Port error!")
+        return
+    
+    if color == "white":
+        port.write(("WHITE").encode())	
+    elif color == "blue":
+        port.write(("BLUE").encode())
+    elif color == "red":
+        port.write(("RED").encode())
+    elif color == "green":
+        port.write(("GREEN").encode())
+
+
 def annotate(frame, color, bbox, area, stable_count):
     out = frame.copy()
     move = MOVE_BY_COLOR.get(color, "—")
+    move_GPIOs(color)
 
     txt1 = f"Color: {color} | Area: {int(area)} | Stable: {stable_count}"
     txt2 = f"Movimiento: {move}"
