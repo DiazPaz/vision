@@ -11,13 +11,15 @@ BAUDRATE = 115200
 CAM_INDEX = 0
 FRAME_W, FRAME_H = 640, 480
 
-MIN_AREA = 2500          # área mínima para aceptar detección
-STABLE_FRAMES = 6        # frames seguidos para validar color
-COOLDOWN_S = 1.5         # tiempo mínimo entre capturas
+MIN_AREA = 2500
+STABLE_FRAMES = 6
+COOLDOWN_S = 1.5
+
+# NUEVO: limitar envio UART (no spamear)
+UART_MIN_INTERVAL_S = 0.12   # 120 ms aprox (ajustable)
 
 SAVE_DIR = "captures_test"
 os.makedirs(SAVE_DIR, exist_ok=True)
-
 
 RED1_LO = np.array([0,   120, 70])
 RED1_HI = np.array([10,  255, 255])
@@ -33,7 +35,6 @@ BLUE_HI  = np.array([130, 255, 255])
 WHITE_LO = np.array([0,   0,   200])
 WHITE_HI = np.array([179, 60,  255])
 
-#movimientos
 MOVE_BY_COLOR = {
     "white": "AVANZAR (F)",
     "red":   "RETROCEDER (B)",
@@ -42,17 +43,29 @@ MOVE_BY_COLOR = {
     "none":  "DETENER (S)"
 }
 
+# Mapeo directo a comandos UART para Arduino
+CMD_BY_COLOR = {
+    "white": "WHITE\n",
+    "red":   "RED\n",
+    "green": "GREEN\n",
+    "blue":  "BLUE\n",
+    "none":  "STOP\n"
+}
+
 def open_serial(port):
     if not port:
         return None
     try:
         s = serial.Serial(port, BAUDRATE, timeout=0.05)
-        print(f"UART abierto: {port}")
+        # bueno para evitar "pegados" al abrir
+        s.reset_input_buffer()
+        s.reset_output_buffer()
+        print(f"UART abierto: {port} @ {BAUDRATE}")
         return s
     except Exception as e:
         print(f"Error abriendo UART {port}: {e}")
         return None
-    
+
 port = open_serial(UART_port)
 
 def now_stamp():
@@ -101,30 +114,37 @@ def detect_color(frame_bgr):
         return "none", None, 0
 
     name, bbox, area = max(candidates, key=lambda x: x[2])
-
     if area < MIN_AREA:
         return "none", None, area
 
     return name, bbox, area
 
-def move_GPIOs(color):
+# NUEVO: envio UART controlado
+_last_sent_cmd = None
+_last_sent_t = 0.0
+
+def send_uart_for_color(color):
+    global _last_sent_cmd, _last_sent_t
+
     if not port:
         print("Port error!")
         return
-    
-    if color == "white":
-        port.write(("WHITE\n").encode())   # ← Agregar \n
-    elif color == "blue":
-        port.write(("BLUE\n").encode())
-    elif color == "red":
-        port.write(("RED\n").encode())
-    elif color == "green":
-        port.write(("GREEN\n").encode())
+
+    cmd = CMD_BY_COLOR.get(color, "STOP\n")
+    t = time.time()
+
+    # solo envia si cambio o si paso intervalo minimo
+    if cmd != _last_sent_cmd or (t - _last_sent_t) > UART_MIN_INTERVAL_S:
+        try:
+            port.write(cmd.encode("ascii", errors="ignore"))
+            _last_sent_cmd = cmd
+            _last_sent_t = t
+        except Exception as e:
+            print(f"UART write error: {e}")
 
 def annotate(frame, color, bbox, area, stable_count):
     out = frame.copy()
     move = MOVE_BY_COLOR.get(color, "—")
-    move_GPIOs(color)
 
     txt1 = f"Color: {color} | Area: {int(area)} | Stable: {stable_count}"
     txt2 = f"Movimiento: {move}"
@@ -136,8 +156,10 @@ def annotate(frame, color, bbox, area, stable_count):
 
     if bbox is not None:
         x, y, w, h = bbox
-        cv2.rectangle(out, (x, y), (x+w, y+h), (0, 255, 255), 2)
-        cv2.putText(out, color, (x, max(0, y-8)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2, cv2.LINE_AA)
+        # si ya es estable, dibuja verde; si no, amarillo
+        color_box = (0, 255, 0) if (color != "none" and stable_count >= STABLE_FRAMES) else (0, 255, 255)
+        cv2.rectangle(out, (x, y), (x+w, y+h), color_box, 2)
+        cv2.putText(out, color, (x, max(0, y-8)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color_box, 2, cv2.LINE_AA)
 
     return out
 
@@ -147,15 +169,17 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
 
     if not cap.isOpened():
-        print("No pude abrir la cámara.")
+        print("No pude abrir la camara.")
         return
 
     last_color = "none"
     stable_count = 0
     last_save_t = 0.0
 
-    print("Listo. Presiona 'q' para salir.")
-    print("Tip: usa hojas o algo.\n")
+    # NUEVO: para mandar STOP cuando se pierde deteccion estable
+    last_decided_color = "none"
+
+    print("Listo. Presiona 'q' para salir.\n")
 
     while True:
         ok, frame = cap.read()
@@ -164,33 +188,42 @@ def main():
 
         color, bbox, area = detect_color(frame)
 
-        # estabilidad anti-parpadeo
-        if color != "none" and color == last_color:
-            stable_count += 1
-        elif color != last_color:
-            stable_count = 1
-            last_color = color
-        else:
-            # si es none, reinicia
-            last_color = "none"
+        # estabilidad anti-parpadeo (mas limpia)
+        if color == "none":
             stable_count = 0
+        else:
+            if color == last_color:
+                stable_count += 1
+            else:
+                last_color = color
+                stable_count = 1
 
-        # "decisión" solo imprime cuando es estable
-        if color != "none" and stable_count == STABLE_FRAMES:
-            print(f"[DECISION] {color.upper()} -> {MOVE_BY_COLOR[color]}")
+        # decision: solo cuando ya es estable
+        decided_color = "none"
+        if stable_count >= STABLE_FRAMES:
+            decided_color = last_color
 
-        # guardar evidencia
+        # enviar UART SOLO si cambia la decision (o STOP si se perdio)
+        if decided_color != last_decided_color:
+            send_uart_for_color(decided_color)
+            if decided_color != "none":
+                print(f"[DECISION] {decided_color.upper()} -> {MOVE_BY_COLOR[decided_color]}")
+            else:
+                print("[DECISION] STOP")
+            last_decided_color = decided_color
+
+        # guardar evidencia (solo cuando esta estable)
         t = time.time()
-        if (color != "none") and (stable_count >= STABLE_FRAMES) and (t - last_save_t > COOLDOWN_S):
-            filename = f"{color}_{now_stamp()}.jpg"
+        if (decided_color != "none") and (t - last_save_t > COOLDOWN_S):
+            filename = f"{decided_color}_{now_stamp()}.jpg"
             path = os.path.join(SAVE_DIR, filename)
 
-            annotated = annotate(frame, color, bbox, area, stable_count)
+            annotated = annotate(frame, decided_color, bbox, area, stable_count)
             cv2.imwrite(path, annotated)
             print(f"[CAPTURA] Guardada: {path}")
             last_save_t = t
 
-        preview = annotate(frame, color, bbox, area, stable_count)
+        preview = annotate(frame, decided_color, bbox, area, stable_count)
         cv2.imshow("Test Color Vision (PC)", preview)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
