@@ -113,14 +113,13 @@ def move_GPIOs(color):
         return
     
     if color == "white":
-        port.write(("WHITE").encode())	
+        port.write(("WHITE\n").encode())   # ← Agregar \n
     elif color == "blue":
-        port.write(("BLUE").encode())
+        port.write(("BLUE\n").encode())
     elif color == "red":
-        port.write(("RED").encode())
+        port.write(("RED\n").encode())
     elif color == "green":
-        port.write(("GREEN").encode())
-
+        port.write(("GREEN\n").encode())
 
 def annotate(frame, color, bbox, area, stable_count):
     out = frame.copy()
