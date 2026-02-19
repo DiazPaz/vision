@@ -12,7 +12,6 @@ except Exception:
     GPIO_OK = False
 
 # ---------------- CPU (optional) ----------------
-# If psutil is not installed, code still runs without CPU metric.
 try:
     import psutil
     PSUTIL_OK = True
@@ -22,37 +21,45 @@ except Exception:
 LED_GPIO_PIN = 17  # change if you wired the LED to another GPIO
 
 def main():
-    # LED setup (no timing, no cooldown)
+    # LED setup (no pulsing by time: ON while detected, OFF otherwise)
     led = None
     if GPIO_OK:
         led = LED(LED_GPIO_PIN)
         led.off()
         print(f"GPIO OK. LED on GPIO{LED_GPIO_PIN}")
     else:
-        print("GPIO not available (running without LED control). Install gpiozero or run on Raspberry Pi.")
+        print("GPIO not available (running without LED control).")
 
     # ---------------- Metrics state ----------------
     # FPS: moving average over last N frames
     frame_dt = deque(maxlen=30)
     last_frame_t = time.perf_counter()
 
-    # Latency metric
+    # Latency (ms)
     latency_ms = 0.0
 
-    # CPU metric
+    # CPU (% approx)
     cpu_percent = 0.0
     last_cpu_t = time.perf_counter()
     if PSUTIL_OK:
         psutil.cpu_percent(None)  # warm up
 
-    # Manual labeling metrics (as you requested)
-    detections_total = 0   # counts detection events (rising edge)
-    TP = 0                 # only increments when you press 'p' during detection
-    FP = 0                 # stays 0 because you do NOT want auto-FP
+    # ---------------- Event labeling (manual TP / FP) ----------------
+    # Event = rising edge: detected goes False -> True
+    event_id = 0
     prev_detected = False
-    current_event_confirmed = False  # TP confirmed for current detection event
+    in_event = False
+    event_label = None  # None, "TP", "FP"
 
-    print("Controls: 'm' change mode | 'p' confirm TP (only when detected) | 'q' or ESC quit")
+    TP_events = 0
+    FP_events = 0
+    UNCONF_events = 0  # ended without TP/FP label
+
+    print("\nControls:")
+    print("  m = change mode (gray/canny/hybrid)")
+    print("  p = mark TP for current detection event")
+    print("  f = mark FP for current detection event")
+    print("  q or ESC = quit\n")
 
     vid = cv2.VideoCapture(0)
     template_path = r"WIN_20260212_15_18_24_Pro.jpg"
@@ -64,8 +71,6 @@ def main():
         return
 
     tpl0 = cv2.GaussianBlur(tpl0, (5, 5), 1.4)
-
-    # Canny on template
     tpl0_canny = cv2.Canny(tpl0, 50, 150)
 
     scales = np.linspace(0.2, 1.3, 20)
@@ -87,7 +92,6 @@ def main():
     detection_mode = "hybrid"
 
     print(f"Detection mode: {detection_mode}")
-    print("Press 'm' to change mode, 'p' to confirm TP, 'ESC' or 'q' to quit")
 
     while True:
         ret, frame = vid.read()
@@ -103,7 +107,7 @@ def main():
             frame_dt.append(dt)
         fps = (len(frame_dt) / sum(frame_dt)) if len(frame_dt) > 3 else 0.0
 
-        # Frame preprocessing
+        # Preprocessing
         vid_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         vid_blur = cv2.GaussianBlur(vid_gray, (5, 5), 1.4)
         vid_canny = cv2.Canny(vid_blur, 50, 150)
@@ -165,29 +169,43 @@ def main():
         t1 = time.perf_counter()
         latency_ms = (t1 - t0) * 1000.0
 
-        # Visualization base
-        out = cv2.cvtColor(vid_blur, cv2.COLOR_GRAY2BGR)
-
-        canny_display = cv2.cvtColor(vid_canny, cv2.COLOR_GRAY2BGR)
-        canny_small = cv2.resize(canny_display, (W // 4, H // 4))
-        out[10:10 + H // 4, 10:10 + W // 4] = canny_small
-
+        # Decide detection
         detected = (best_loc is not None and best_score >= thresh and (best_scale is not None and best_scale >= 0.1))
 
-        # ---------------- Detection event counting (no auto FP) ----------------
-        # Count only when detection starts (rising edge)
+        # ---------------- Event start/end logic ----------------
+        # Start event (rising edge)
         if detected and not prev_detected:
-            detections_total += 1
-            current_event_confirmed = False  # new event, not confirmed yet
+            event_id += 1
+            in_event = True
+            event_label = None
+            print(f"[EVENT {event_id}] START (detected) best_score={best_score:.3f} scale={best_scale:.2f}")
 
-        # LED behavior: ON while detected, OFF otherwise (no seconds logic)
+        # End event (falling edge)
+        if (not detected) and prev_detected:
+            in_event = False
+            if event_label is None:
+                UNCONF_events += 1
+                print(f"[EVENT {event_id}] END (unconfirmed)")
+            else:
+                print(f"[EVENT {event_id}] END (label={event_label})")
+
+        prev_detected = detected
+
+        # LED behavior: ON while detected
         if led is not None:
             if detected:
                 led.on()
             else:
                 led.off()
 
-        # Draw bbox if detected
+        # Visualization
+        out = cv2.cvtColor(vid_blur, cv2.COLOR_GRAY2BGR)
+
+        # show small canny window
+        canny_display = cv2.cvtColor(vid_canny, cv2.COLOR_GRAY2BGR)
+        canny_small = cv2.resize(canny_display, (W // 4, H // 4))
+        out[10:10 + H // 4, 10:10 + W // 4] = canny_small
+
         if detected:
             x, y = best_loc
             tw, th = best_size
@@ -198,23 +216,22 @@ def main():
             cv2.putText(out, f"no detect (best={best_score:.3f} < thr={thresh:.2f})",
                         (10, H - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-        # ---------------- CPU (approx, update every 0.5s) ----------------
+        # CPU (update every 0.5s)
         if PSUTIL_OK and (time.perf_counter() - last_cpu_t) > 0.5:
             cpu_percent = psutil.cpu_percent(None)
             last_cpu_t = time.perf_counter()
 
-        # ---------------- Metrics overlay ----------------
-        # Unconfirmed detections = detections_total - TP (since FP stays 0 by your rule)
-        unconfirmed = detections_total - TP
-        # "Precision" here is "confirmed TP / total detections" (you can report it this way)
-        precision = (TP / detections_total) if detections_total > 0 else 0.0
+        # Metrics overlay
+        labeled = TP_events + FP_events
+        precision = (TP_events / labeled) if labeled > 0 else 0.0
 
+        label_txt = event_label if (in_event and event_label is not None) else ("NONE" if in_event else "-")
         line1 = f"Mode:{detection_mode.upper()} | FPS:{fps:.1f} | Lat:{latency_ms:.1f}ms"
-        line2 = f"TP:{TP} | Detections:{detections_total} | Unconfirmed:{unconfirmed} | Prec:{precision:.3f}"
+        line2 = f"TPev:{TP_events} | FPev:{FP_events} | UNCONF:{UNCONF_events} | Prec:{precision:.3f}"
         if PSUTIL_OK:
-            line3 = f"CPU:{cpu_percent:.0f}% | thr:{thresh:.2f} | Press 'p' to confirm TP"
+            line3 = f"CPU:{cpu_percent:.0f}% | Event:{event_id if in_event else 0} | Label:{label_txt} | thr:{thresh:.2f}"
         else:
-            line3 = f"CPU:N/A (pip3 install psutil) | thr:{thresh:.2f} | Press 'p' to confirm TP"
+            line3 = f"CPU:N/A | Event:{event_id if in_event else 0} | Label:{label_txt} | thr:{thresh:.2f}"
 
         cv2.putText(out, line1, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
         cv2.putText(out, line2, (10, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
@@ -222,7 +239,7 @@ def main():
 
         cv2.imshow("Multi-Scale Template Matching + Canny", out)
 
-        # ---------------- Keys ----------------
+        # Keys
         key = cv2.waitKey(1) & 0xFF
         if key == 27 or key == ord("q"):
             break
@@ -231,18 +248,28 @@ def main():
             current_idx = modes.index(detection_mode)
             detection_mode = modes[(current_idx + 1) % 3]
             print(f"Switched to mode: {detection_mode}")
-        elif key == ord("p"):
-            # Confirm TP only if we are currently detected and not confirmed yet for this event
-            if detected and not current_event_confirmed:
-                TP += 1
-                current_event_confirmed = True
-                print("TP confirmed for current detection event.")
-            elif not detected:
-                print("No detection right now. Put the object in front of the camera and try again.")
-            else:
-                print("This detection event is already confirmed as TP.")
 
-        prev_detected = detected
+        # Mark TP event (manual)
+        elif key == ord("p"):
+            if detected and in_event and event_label is None:
+                TP_events += 1
+                event_label = "TP"
+                print(f"[EVENT {event_id}] TP EVENT marked (confirmed by user)")
+            elif not detected:
+                print("No detection right now. Trigger a detection first, then press 'p'.")
+            else:
+                print("This event is already labeled (TP or FP).")
+
+        # Mark FP event (manual)
+        elif key == ord("f"):
+            if detected and in_event and event_label is None:
+                FP_events += 1
+                event_label = "FP"
+                print(f"[EVENT {event_id}] FP EVENT marked (confirmed by user)")
+            elif not detected:
+                print("No detection right now. Trigger a detection first, then press 'f'.")
+            else:
+                print("This event is already labeled (TP or FP).")
 
     # Cleanup
     vid.release()
@@ -250,17 +277,15 @@ def main():
     if led is not None:
         led.off()
 
-    # Final summary (console)
-    unconfirmed = detections_total - TP
-    precision = (TP / detections_total) if detections_total > 0 else 0.0
-    print("\n=== Summary ===")
-    print(f"TP={TP} | Detections={detections_total} | Unconfirmed={unconfirmed}")
-    print(f"Precision(TP/Detections)={precision:.4f}")
+    # Final summary
+    labeled = TP_events + FP_events
+    precision = (TP_events / labeled) if labeled > 0 else 0.0
+    print("\n=== Summary (events) ===")
+    print(f"TP_events={TP_events} | FP_events={FP_events} | UNCONF_events={UNCONF_events}")
+    print(f"Precision(TP/(TP+FP))={precision:.4f}")
     print(f"FPS(last avg)={fps:.2f} | Latency(last)={latency_ms:.2f} ms")
     if PSUTIL_OK:
         print(f"CPU(last)={cpu_percent:.0f}%")
-    else:
-        print("CPU=N/A (install psutil)")
 
 if __name__ == "__main__":
     main()
