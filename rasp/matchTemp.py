@@ -20,15 +20,10 @@ except Exception:
     PSUTIL_OK = False
 
 LED_GPIO_PIN = 17  # change if you wired the LED to another GPIO
-LED_ON_TIME_S = 0.15  # how long to keep LED on when detection happens
 
 def main():
-    # LED setup
+    # LED setup (no timing, no cooldown)
     led = None
-    led_off_deadline = 0.0
-    last_trigger_time = 0.0
-    trigger_cooldown_s = 0.25  # avoid re-triggering every single frame
-
     if GPIO_OK:
         led = LED(LED_GPIO_PIN)
         led.off()
@@ -41,9 +36,8 @@ def main():
     frame_dt = deque(maxlen=30)
     last_frame_t = time.perf_counter()
 
-    # Precision & False Positives require ground truth (manual toggle)
-    gt_present = False  # press 'p' to toggle "object is present"
-    TP = FP = FN = TN = 0
+    # Latency metric
+    latency_ms = 0.0
 
     # CPU metric
     cpu_percent = 0.0
@@ -51,10 +45,14 @@ def main():
     if PSUTIL_OK:
         psutil.cpu_percent(None)  # warm up
 
-    # Latency metric
-    latency_ms = 0.0
+    # Manual labeling metrics (as you requested)
+    detections_total = 0   # counts detection events (rising edge)
+    TP = 0                 # only increments when you press 'p' during detection
+    FP = 0                 # stays 0 because you do NOT want auto-FP
+    prev_detected = False
+    current_event_confirmed = False  # TP confirmed for current detection event
 
-    print("Controls: 'm' change mode | 'p' toggle GT present/absent | 'q' or ESC quit")
+    print("Controls: 'm' change mode | 'p' confirm TP (only when detected) | 'q' or ESC quit")
 
     vid = cv2.VideoCapture(0)
     template_path = r"WIN_20260212_15_18_24_Pro.jpg"
@@ -89,7 +87,7 @@ def main():
     detection_mode = "hybrid"
 
     print(f"Detection mode: {detection_mode}")
-    print("Press 'm' to change mode, 'p' to toggle GT, 'ESC' or 'q' to quit")
+    print("Press 'm' to change mode, 'p' to confirm TP, 'ESC' or 'q' to quit")
 
     while True:
         ret, frame = vid.read()
@@ -104,8 +102,6 @@ def main():
         if dt > 0:
             frame_dt.append(dt)
         fps = (len(frame_dt) / sum(frame_dt)) if len(frame_dt) > 3 else 0.0
-
-        now = time.time()
 
         # Frame preprocessing
         vid_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -169,7 +165,7 @@ def main():
         t1 = time.perf_counter()
         latency_ms = (t1 - t0) * 1000.0
 
-        # Visualization
+        # Visualization base
         out = cv2.cvtColor(vid_blur, cv2.COLOR_GRAY2BGR)
 
         canny_display = cv2.cvtColor(vid_canny, cv2.COLOR_GRAY2BGR)
@@ -178,52 +174,47 @@ def main():
 
         detected = (best_loc is not None and best_score >= thresh and (best_scale is not None and best_scale >= 0.1))
 
-        # ---------------- Confusion matrix for Precision / False positives (manual GT) ----------------
-        if detected and gt_present:
-            TP += 1
-        elif detected and not gt_present:
-            FP += 1
-        elif (not detected) and gt_present:
-            FN += 1
-        else:
-            TN += 1
+        # ---------------- Detection event counting (no auto FP) ----------------
+        # Count only when detection starts (rising edge)
+        if detected and not prev_detected:
+            detections_total += 1
+            current_event_confirmed = False  # new event, not confirmed yet
 
-        precision = (TP / (TP + FP)) if (TP + FP) > 0 else 0.0
+        # LED behavior: ON while detected, OFF otherwise (no seconds logic)
+        if led is not None:
+            if detected:
+                led.on()
+            else:
+                led.off()
 
-        # ---------------- CPU (approx, update every 0.5s) ----------------
-        if PSUTIL_OK and (time.perf_counter() - last_cpu_t) > 0.5:
-            cpu_percent = psutil.cpu_percent(None)
-            last_cpu_t = time.perf_counter()
-
+        # Draw bbox if detected
         if detected:
             x, y = best_loc
             tw, th = best_size
             cv2.rectangle(out, (x, y), (x + tw, y + th), (0, 255, 0), 2)
             cv2.putText(out, f"score={best_score:.3f} scale={best_scale:.2f}",
                         (x, max(20, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-            # ---------- LED trigger when bounding box is detected ----------
-            if led is not None and (now - last_trigger_time) >= trigger_cooldown_s:
-                led.on()
-                led_off_deadline = now + LED_ON_TIME_S
-                last_trigger_time = now
         else:
             cv2.putText(out, f"no detect (best={best_score:.3f} < thr={thresh:.2f})",
                         (10, H - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-        # Turn off LED after a short pulse
-        if led is not None and led_off_deadline > 0 and now >= led_off_deadline:
-            led.off()
-            led_off_deadline = 0.0
+        # ---------------- CPU (approx, update every 0.5s) ----------------
+        if PSUTIL_OK and (time.perf_counter() - last_cpu_t) > 0.5:
+            cpu_percent = psutil.cpu_percent(None)
+            last_cpu_t = time.perf_counter()
 
-        # ---------------- On-screen metrics overlay ----------------
-        gt_txt = "GT:PRESENT" if gt_present else "GT:ABSENT"
-        line1 = f"Mode: {detection_mode.upper()} | FPS: {fps:.1f} | Lat: {latency_ms:.1f} ms"
-        line2 = f"Prec: {precision:.3f} | FP: {FP} | TP:{TP} FN:{FN} TN:{TN}"
+        # ---------------- Metrics overlay ----------------
+        # Unconfirmed detections = detections_total - TP (since FP stays 0 by your rule)
+        unconfirmed = detections_total - TP
+        # "Precision" here is "confirmed TP / total detections" (you can report it this way)
+        precision = (TP / detections_total) if detections_total > 0 else 0.0
+
+        line1 = f"Mode:{detection_mode.upper()} | FPS:{fps:.1f} | Lat:{latency_ms:.1f}ms"
+        line2 = f"TP:{TP} | Detections:{detections_total} | Unconfirmed:{unconfirmed} | Prec:{precision:.3f}"
         if PSUTIL_OK:
-            line3 = f"CPU: {cpu_percent:.0f}% | {gt_txt} | thr:{thresh:.2f}"
+            line3 = f"CPU:{cpu_percent:.0f}% | thr:{thresh:.2f} | Press 'p' to confirm TP"
         else:
-            line3 = f"CPU: N/A (pip3 install psutil) | {gt_txt} | thr:{thresh:.2f}"
+            line3 = f"CPU:N/A (pip3 install psutil) | thr:{thresh:.2f} | Press 'p' to confirm TP"
 
         cv2.putText(out, line1, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
         cv2.putText(out, line2, (10, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
@@ -231,6 +222,7 @@ def main():
 
         cv2.imshow("Multi-Scale Template Matching + Canny", out)
 
+        # ---------------- Keys ----------------
         key = cv2.waitKey(1) & 0xFF
         if key == 27 or key == ord("q"):
             break
@@ -240,8 +232,17 @@ def main():
             detection_mode = modes[(current_idx + 1) % 3]
             print(f"Switched to mode: {detection_mode}")
         elif key == ord("p"):
-            gt_present = not gt_present
-            print(f"GT toggled -> {'PRESENT' if gt_present else 'ABSENT'}")
+            # Confirm TP only if we are currently detected and not confirmed yet for this event
+            if detected and not current_event_confirmed:
+                TP += 1
+                current_event_confirmed = True
+                print("TP confirmed for current detection event.")
+            elif not detected:
+                print("No detection right now. Put the object in front of the camera and try again.")
+            else:
+                print("This detection event is already confirmed as TP.")
+
+        prev_detected = detected
 
     # Cleanup
     vid.release()
@@ -250,10 +251,11 @@ def main():
         led.off()
 
     # Final summary (console)
-    precision = (TP / (TP + FP)) if (TP + FP) > 0 else 0.0
+    unconfirmed = detections_total - TP
+    precision = (TP / detections_total) if detections_total > 0 else 0.0
     print("\n=== Summary ===")
-    print(f"TP={TP} FP={FP} FN={FN} TN={TN}")
-    print(f"Precision={precision:.4f}")
+    print(f"TP={TP} | Detections={detections_total} | Unconfirmed={unconfirmed}")
+    print(f"Precision(TP/Detections)={precision:.4f}")
     print(f"FPS(last avg)={fps:.2f} | Latency(last)={latency_ms:.2f} ms")
     if PSUTIL_OK:
         print(f"CPU(last)={cpu_percent:.0f}%")
