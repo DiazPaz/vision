@@ -5,11 +5,19 @@ import time
 # Configuración
 WIN_NAME = "Camera Matching"
 CAM_INDEX = 0
+<<<<<<< HEAD
+MIN_MATCH = 8  # Mínimo de matches para considerar detección válida
+MAX_FEATURES = 3000
+RATIO_THRESHOLD = 0.90  # Más restrictivo para mejores matches
+RANSAC_THRESHOLD = 3.0
+MAX_MATCHES_DRAW = 50
+=======
 MIN_MATCH = 20  # Mínimo de matches para considerar detección válida
 MAX_FEATURES = 2000
 RATIO_THRESHOLD = 0.75  # Más restrictivo para mejores matches
 RANSAC_THRESHOLD = 5.0
 MAX_MATCHES_DRAW = 75
+>>>>>>> b3084dcb9112fbc43f330f4da2f56b8dd3229735
 
 def compute_template_features(detector, img_bgr):
     """Extrae características de la imagen template."""
@@ -136,7 +144,7 @@ def setup_camera(cam_index=CAM_INDEX):
 
 def main():
     # Cargar imagen template
-    img1 = cv2.imread(r"vision\rasp\rubik.png")
+    img1 = cv2.imread(r"Screenshot 2026-02-09 210243.png")
     if img1 is None:
         print("Error: No se pudo leer vision\\rasp\\rubik.png")
         return

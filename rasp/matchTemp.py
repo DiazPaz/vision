@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import time
+import time 
 from collections import deque
 
 # ---------------- GPIO (Raspberry Pi) ----------------
@@ -29,7 +29,7 @@ def main():
         print("GPIO not available (running without LED control). Install gpiozero or run on Raspberry Pi.")
 
     vid = cv2.VideoCapture(0)
-    template_path = r"vision\rasp\rubik.png"
+    template_path = r"WIN_20260212_15_18_24_Pro.jpg"
 
     # Load original template
     tpl0 = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
@@ -57,7 +57,7 @@ def main():
             scaled_templates_gray.append((float(s), tpl_gray, tw, th))
             scaled_templates_canny.append((float(s), tpl_canny, tw, th))
 
-    thresh = 0.2
+    thresh = 0.75
     detection_mode = "hybrid"
 
     print(f"Detection mode: {detection_mode}")
@@ -134,7 +134,7 @@ def main():
         canny_small = cv2.resize(canny_display, (W // 4, H // 4))
         out[10:10 + H // 4, 10:10 + W // 4] = canny_small
 
-        detected = (best_loc is not None and best_score >= thresh and (best_scale is not None and best_scale >= 0.350))
+        detected = (best_loc is not None and best_score >= thresh and (best_scale is not None and best_scale >= 0.1))
 
         if detected:
             x, y = best_loc
