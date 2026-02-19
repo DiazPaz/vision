@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import time 
+import time
 from collections import deque
 
 # ---------------- GPIO (Raspberry Pi) ----------------
@@ -10,6 +10,14 @@ try:
     GPIO_OK = True
 except Exception:
     GPIO_OK = False
+
+# ---------------- CPU (optional) ----------------
+# If psutil is not installed, code still runs without CPU metric.
+try:
+    import psutil
+    PSUTIL_OK = True
+except Exception:
+    PSUTIL_OK = False
 
 LED_GPIO_PIN = 17  # change if you wired the LED to another GPIO
 LED_ON_TIME_S = 0.15  # how long to keep LED on when detection happens
@@ -27,6 +35,26 @@ def main():
         print(f"GPIO OK. LED on GPIO{LED_GPIO_PIN}")
     else:
         print("GPIO not available (running without LED control). Install gpiozero or run on Raspberry Pi.")
+
+    # ---------------- Metrics state ----------------
+    # FPS: moving average over last N frames
+    frame_dt = deque(maxlen=30)
+    last_frame_t = time.perf_counter()
+
+    # Precision & False Positives require ground truth (manual toggle)
+    gt_present = False  # press 'p' to toggle "object is present"
+    TP = FP = FN = TN = 0
+
+    # CPU metric
+    cpu_percent = 0.0
+    last_cpu_t = time.perf_counter()
+    if PSUTIL_OK:
+        psutil.cpu_percent(None)  # warm up
+
+    # Latency metric
+    latency_ms = 0.0
+
+    print("Controls: 'm' change mode | 'p' toggle GT present/absent | 'q' or ESC quit")
 
     vid = cv2.VideoCapture(0)
     template_path = r"WIN_20260212_15_18_24_Pro.jpg"
@@ -61,13 +89,21 @@ def main():
     detection_mode = "hybrid"
 
     print(f"Detection mode: {detection_mode}")
-    print("Press 'm' to change mode, 'ESC' or 'q' to quit")
+    print("Press 'm' to change mode, 'p' to toggle GT, 'ESC' or 'q' to quit")
 
     while True:
         ret, frame = vid.read()
         if not ret:
             print("Could not read video frame.")
             break
+
+        # ---------------- FPS ----------------
+        now_t = time.perf_counter()
+        dt = now_t - last_frame_t
+        last_frame_t = now_t
+        if dt > 0:
+            frame_dt.append(dt)
+        fps = (len(frame_dt) / sum(frame_dt)) if len(frame_dt) > 3 else 0.0
 
         now = time.time()
 
@@ -82,6 +118,9 @@ def main():
         best_scale = None
 
         H, W = vid_blur.shape[:2]
+
+        # ---------------- Latency (only detection block) ----------------
+        t0 = time.perf_counter()
 
         if detection_mode == "gray":
             for s, tpl, tw, th in scaled_templates_gray:
@@ -127,6 +166,9 @@ def main():
                     best_size = (tw, th)
                     best_scale = float(s)
 
+        t1 = time.perf_counter()
+        latency_ms = (t1 - t0) * 1000.0
+
         # Visualization
         out = cv2.cvtColor(vid_blur, cv2.COLOR_GRAY2BGR)
 
@@ -135,6 +177,23 @@ def main():
         out[10:10 + H // 4, 10:10 + W // 4] = canny_small
 
         detected = (best_loc is not None and best_score >= thresh and (best_scale is not None and best_scale >= 0.1))
+
+        # ---------------- Confusion matrix for Precision / False positives (manual GT) ----------------
+        if detected and gt_present:
+            TP += 1
+        elif detected and not gt_present:
+            FP += 1
+        elif (not detected) and gt_present:
+            FN += 1
+        else:
+            TN += 1
+
+        precision = (TP / (TP + FP)) if (TP + FP) > 0 else 0.0
+
+        # ---------------- CPU (approx, update every 0.5s) ----------------
+        if PSUTIL_OK and (time.perf_counter() - last_cpu_t) > 0.5:
+            cpu_percent = psutil.cpu_percent(None)
+            last_cpu_t = time.perf_counter()
 
         if detected:
             x, y = best_loc
@@ -157,8 +216,18 @@ def main():
             led.off()
             led_off_deadline = 0.0
 
-        cv2.putText(out, f"Mode: {detection_mode.upper()}",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        # ---------------- On-screen metrics overlay ----------------
+        gt_txt = "GT:PRESENT" if gt_present else "GT:ABSENT"
+        line1 = f"Mode: {detection_mode.upper()} | FPS: {fps:.1f} | Lat: {latency_ms:.1f} ms"
+        line2 = f"Prec: {precision:.3f} | FP: {FP} | TP:{TP} FN:{FN} TN:{TN}"
+        if PSUTIL_OK:
+            line3 = f"CPU: {cpu_percent:.0f}% | {gt_txt} | thr:{thresh:.2f}"
+        else:
+            line3 = f"CPU: N/A (pip3 install psutil) | {gt_txt} | thr:{thresh:.2f}"
+
+        cv2.putText(out, line1, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+        cv2.putText(out, line2, (10, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+        cv2.putText(out, line3, (10, 71), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
 
         cv2.imshow("Multi-Scale Template Matching + Canny", out)
 
@@ -170,12 +239,26 @@ def main():
             current_idx = modes.index(detection_mode)
             detection_mode = modes[(current_idx + 1) % 3]
             print(f"Switched to mode: {detection_mode}")
+        elif key == ord("p"):
+            gt_present = not gt_present
+            print(f"GT toggled -> {'PRESENT' if gt_present else 'ABSENT'}")
 
     # Cleanup
     vid.release()
     cv2.destroyAllWindows()
     if led is not None:
         led.off()
+
+    # Final summary (console)
+    precision = (TP / (TP + FP)) if (TP + FP) > 0 else 0.0
+    print("\n=== Summary ===")
+    print(f"TP={TP} FP={FP} FN={FN} TN={TN}")
+    print(f"Precision={precision:.4f}")
+    print(f"FPS(last avg)={fps:.2f} | Latency(last)={latency_ms:.2f} ms")
+    if PSUTIL_OK:
+        print(f"CPU(last)={cpu_percent:.0f}%")
+    else:
+        print("CPU=N/A (install psutil)")
 
 if __name__ == "__main__":
     main()
