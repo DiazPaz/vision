@@ -11,8 +11,8 @@ import firebase_admin
 from firebase_admin import credentials, storage
 
 # --- Inicializar Firebase (una sola vez) ---
-cred = credentials.Certificate("/home/perres/vision/vis-p1-firebase-adminsdk-fbsvc-a4a2445ca6.json")
-firebase_admin.initialize_app(cred, {'storageBucket': 'gs://vis-p1.firebasestorage.app'})
+cred = credentials.Certificate("/home/perres/vision/vis-p1-firebase-adminsdk-fbsvc-b2c0abdd8d.json")
+firebase_admin.initialize_app(cred, {'storageBucket': 'vis-p1.firebasestorage.app'})
 
 def upload_image(local_path, remote_filename):
     """Corre en hilo separado para no bloquear el robot"""
