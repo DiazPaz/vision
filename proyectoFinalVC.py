@@ -5,6 +5,12 @@ import numpy as np
 import serial
 from datetime import datetime
 
+import firebase_admin
+from firebase_admin import credentials
+
+cred = credentials.Certificate("path/to/serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
+
 UART_port = "/dev/ttyUSB0"
 BAUDRATE = 115200
 

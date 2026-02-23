@@ -1,0 +1,43 @@
+import cv2
+import numpy as np
+
+# Load template image
+template = cv2.imread('rasp\WIN_20260212_15_18_24_Pro.jpg', cv2.IMREAD_GRAYSCALE)
+
+# Initialize camera
+cap = cv2.VideoCapture(0)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    # Apply Canny edge detection to the grayscale frame to extract edges
+    edges = cv2.Canny(gray, 100, 200)
+    # Apply Canny edge detection to the template image for consistent matching
+    template_edges = cv2.Canny(template, 100, 200)
+    
+    # Template matching
+    result = cv2.matchTemplate(edges, template_edges, cv2.TM_CCOEFF)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+    
+    # Draw rectangle around matched region
+    # Only draw rectangle if match confidence exceeds threshold (higher max_val = better match)
+    if max_val > 10:  # Adjust threshold as needed
+        top_left = max_loc
+        h, w = template_edges.shape
+        bottom_right = (top_left[0] + w, top_left[1] + h)
+        cv2.rectangle(frame, top_left, bottom_right, (0, 255, 0), 2)
+    
+    # Display results
+    cv2.imshow('Original', frame)
+    cv2.imshow('Canny Edges', edges)
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
