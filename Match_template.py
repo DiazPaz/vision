@@ -1,0 +1,291 @@
+import cv2
+import numpy as np
+import time
+from collections import deque
+
+# ---------------- GPIO (Raspberry Pi) ----------------
+# If you are NOT on a Raspberry Pi, the code will still run without GPIO.
+try:
+    from gpiozero import LED
+    GPIO_OK = True
+except Exception:
+    GPIO_OK = False
+
+# ---------------- CPU (optional) ----------------
+try:
+    import psutil
+    PSUTIL_OK = True
+except Exception:
+    PSUTIL_OK = False
+
+LED_GPIO_PIN = 17  # change if you wired the LED to another GPIO
+
+def main():
+    # LED setup (no pulsing by time: ON while detected, OFF otherwise)
+    led = None
+    if GPIO_OK:
+        led = LED(LED_GPIO_PIN)
+        led.off()
+        print(f"GPIO OK. LED on GPIO{LED_GPIO_PIN}")
+    else:
+        print("GPIO not available (running without LED control).")
+
+    # ---------------- Metrics state ----------------
+    # FPS: moving average over last N frames
+    frame_dt = deque(maxlen=30)
+    last_frame_t = time.perf_counter()
+
+    # Latency (ms)
+    latency_ms = 0.0
+
+    # CPU (% approx)
+    cpu_percent = 0.0
+    last_cpu_t = time.perf_counter()
+    if PSUTIL_OK:
+        psutil.cpu_percent(None)  # warm up
+
+    # ---------------- Event labeling (manual TP / FP) ----------------
+    # Event = rising edge: detected goes False -> True
+    event_id = 0
+    prev_detected = False
+    in_event = False
+    event_label = None  # None, "TP", "FP"
+
+    TP_events = 0
+    FP_events = 0
+    UNCONF_events = 0  # ended without TP/FP label
+
+    print("\nControls:")
+    print("  m = change mode (gray/canny/hybrid)")
+    print("  p = mark TP for current detection event")
+    print("  f = mark FP for current detection event")
+    print("  q or ESC = quit\n")
+
+    vid = cv2.VideoCapture(0)
+    template_path = r"rasp/WIN_20260212_15_18_24_Pro.jpg"
+
+    # Load original template
+    tpl0 = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+    if tpl0 is None:
+        print(f"Template not found: {template_path}")
+        return
+
+    tpl0 = cv2.GaussianBlur(tpl0, (5, 5), 1.4)
+    tpl0_canny = cv2.Canny(tpl0, 50, 150)
+
+    scales = np.linspace(0.2, 1.3, 20)
+    scaled_templates_gray = []
+    scaled_templates_canny = []
+
+    # Prepare multi-scale templates (gray + canny)
+    for s in scales:
+        tpl_gray = cv2.resize(tpl0, None, fx=float(s), fy=float(s), interpolation=cv2.INTER_AREA)
+        th, tw = tpl_gray.shape
+
+        tpl_canny = cv2.resize(tpl0_canny, None, fx=float(s), fy=float(s), interpolation=cv2.INTER_AREA)
+
+        if th >= 12 and tw >= 12:
+            scaled_templates_gray.append((float(s), tpl_gray, tw, th))
+            scaled_templates_canny.append((float(s), tpl_canny, tw, th))
+
+    thresh = 0.75
+    detection_mode = "hybrid"
+
+    print(f"Detection mode: {detection_mode}")
+
+    while True:
+        ret, frame = vid.read()
+        if not ret:
+            print("Could not read video frame.")
+            break
+
+        # ---------------- FPS ----------------
+        now_t = time.perf_counter()
+        dt = now_t - last_frame_t
+        last_frame_t = now_t
+        if dt > 0:
+            frame_dt.append(dt)
+        fps = (len(frame_dt) / sum(frame_dt)) if len(frame_dt) > 3 else 0.0
+
+        # Preprocessing
+        vid_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        vid_blur = cv2.GaussianBlur(vid_gray, (5, 5), 1.4)
+        vid_canny = cv2.Canny(vid_blur, 50, 150)
+
+        best_score = -1.0
+        best_loc = None
+        best_size = None
+        best_scale = None
+
+        H, W = vid_blur.shape[:2]
+
+        # ---------------- Latency (only detection block) ----------------
+        t0 = time.perf_counter()
+
+        if detection_mode == "gray":
+            for s, tpl, tw, th in scaled_templates_gray:
+                if th >= H or tw >= W:
+                    continue
+                res = cv2.matchTemplate(vid_blur, tpl, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                if max_val > best_score:
+                    best_score = float(max_val)
+                    best_loc = max_loc
+                    best_size = (tw, th)
+                    best_scale = float(s)
+
+        elif detection_mode == "canny":
+            for s, tpl, tw, th in scaled_templates_canny:
+                if th >= H or tw >= W:
+                    continue
+                res = cv2.matchTemplate(vid_canny, tpl, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                if max_val > best_score:
+                    best_score = float(max_val)
+                    best_loc = max_loc
+                    best_size = (tw, th)
+                    best_scale = float(s)
+
+        elif detection_mode == "hybrid":
+            for i, (s, tpl_gray, tw, th) in enumerate(scaled_templates_gray):
+                if th >= H or tw >= W:
+                    continue
+
+                res_gray = cv2.matchTemplate(vid_blur, tpl_gray, cv2.TM_CCOEFF_NORMED)
+                _, max_val_gray, _, max_loc_gray = cv2.minMaxLoc(res_gray)
+
+                tpl_canny = scaled_templates_canny[i][1]
+                res_canny = cv2.matchTemplate(vid_canny, tpl_canny, cv2.TM_CCOEFF_NORMED)
+                _, max_val_canny, _, _ = cv2.minMaxLoc(res_canny)
+
+                combined_score = 0.6 * max_val_gray + 0.4 * max_val_canny
+
+                if combined_score > best_score:
+                    best_score = float(combined_score)
+                    best_loc = max_loc_gray
+                    best_size = (tw, th)
+                    best_scale = float(s)
+
+        t1 = time.perf_counter()
+        latency_ms = (t1 - t0) * 1000.0
+
+        # Decide detection
+        detected = (best_loc is not None and best_score >= thresh and (best_scale is not None and best_scale >= 0.1))
+
+        # ---------------- Event start/end logic ----------------
+        # Start event (rising edge)
+        if detected and not prev_detected:
+            event_id += 1
+            in_event = True
+            event_label = None
+            print(f"[EVENT {event_id}] START (detected) best_score={best_score:.3f} scale={best_scale:.2f}")
+
+        # End event (falling edge)
+        if (not detected) and prev_detected:
+            in_event = False
+            if event_label is None:
+                UNCONF_events += 1
+                print(f"[EVENT {event_id}] END (unconfirmed)")
+            else:
+                print(f"[EVENT {event_id}] END (label={event_label})")
+
+        prev_detected = detected
+
+        # LED behavior: ON while detected
+        if led is not None:
+            if detected:
+                led.on()
+            else:
+                led.off()
+
+        # Visualization
+        out = cv2.cvtColor(vid_blur, cv2.COLOR_GRAY2BGR)
+
+        # show small canny window
+        canny_display = cv2.cvtColor(vid_canny, cv2.COLOR_GRAY2BGR)
+        canny_small = cv2.resize(canny_display, (W // 4, H // 4))
+        out[10:10 + H // 4, 10:10 + W // 4] = canny_small
+
+        if detected:
+            x, y = best_loc
+            tw, th = best_size
+            cv2.rectangle(out, (x, y), (x + tw, y + th), (0, 255, 0), 2)
+            cv2.putText(out, f"score={best_score:.3f} scale={best_scale:.2f}",
+                        (x, max(20, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        else:
+            cv2.putText(out, f"no detect (best={best_score:.3f} < thr={thresh:.2f})",
+                        (10, H - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        # CPU (update every 0.5s)
+        if PSUTIL_OK and (time.perf_counter() - last_cpu_t) > 0.5:
+            cpu_percent = psutil.cpu_percent(None)
+            last_cpu_t = time.perf_counter()
+
+        # Metrics overlay
+        labeled = TP_events + FP_events
+        precision = (TP_events / labeled) if labeled > 0 else 0.0
+
+        label_txt = event_label if (in_event and event_label is not None) else ("NONE" if in_event else "-")
+        line1 = f"Mode:{detection_mode.upper()} | FPS:{fps:.1f} | Lat:{latency_ms:.1f}ms"
+        line2 = f"TPev:{TP_events} | FPev:{FP_events} | UNCONF:{UNCONF_events} | Prec:{precision:.3f}"
+        if PSUTIL_OK:
+            line3 = f"CPU:{cpu_percent:.0f}% | Event:{event_id if in_event else 0} | Label:{label_txt} | thr:{thresh:.2f}"
+        else:
+            line3 = f"CPU:N/A | Event:{event_id if in_event else 0} | Label:{label_txt} | thr:{thresh:.2f}"
+
+        cv2.putText(out, line1, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+        cv2.putText(out, line2, (10, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+        cv2.putText(out, line3, (10, 71), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+
+        cv2.imshow("Multi-Scale Template Matching + Canny", out)
+
+        # Keys
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27 or key == ord("q"):
+            break
+        elif key == ord("m"):
+            modes = ["gray", "canny", "hybrid"]
+            current_idx = modes.index(detection_mode)
+            detection_mode = modes[(current_idx + 1) % 3]
+            print(f"Switched to mode: {detection_mode}")
+
+        # Mark TP event (manual)
+        elif key == ord("p"):
+            if detected and in_event and event_label is None:
+                TP_events += 1
+                event_label = "TP"
+                print(f"[EVENT {event_id}] TP EVENT marked (confirmed by user)")
+            elif not detected:
+                print("No detection right now. Trigger a detection first, then press 'p'.")
+            else:
+                print("This event is already labeled (TP or FP).")
+
+        # Mark FP event (manual)
+        elif key == ord("f"):
+            if detected and in_event and event_label is None:
+                FP_events += 1
+                event_label = "FP"
+                print(f"[EVENT {event_id}] FP EVENT marked (confirmed by user)")
+            elif not detected:
+                print("No detection right now. Trigger a detection first, then press 'f'.")
+            else:
+                print("This event is already labeled (TP or FP).")
+
+    # Cleanup
+    vid.release()
+    cv2.destroyAllWindows()
+    if led is not None:
+        led.off()
+
+    # Final summary
+    labeled = TP_events + FP_events
+    precision = (TP_events / labeled) if labeled > 0 else 0.0
+    print("\n=== Summary (events) ===")
+    print(f"TP_events={TP_events} | FP_events={FP_events} | UNCONF_events={UNCONF_events}")
+    print(f"Precision(TP/(TP+FP))={precision:.4f}")
+    print(f"FPS(last avg)={fps:.2f} | Latency(last)={latency_ms:.2f} ms")
+    if PSUTIL_OK:
+        print(f"CPU(last)={cpu_percent:.0f}%")
+
+if __name__ == "__main__":
+    main()
