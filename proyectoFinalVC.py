@@ -4,12 +4,40 @@ import time
 import numpy as np
 import serial
 from datetime import datetime
+import threading
+
 
 import firebase_admin
-from firebase_admin import credentials
+from firebase_admin import credentials, storage
 
-cred = credentials.Certificate("path/to/serviceAccountKey.json")
-firebase_admin.initialize_app(cred)
+# --- Inicializar Firebase (una sola vez) ---
+cred = credentials.Certificate("/home/pi/serviceAccount.json")
+firebase_admin.initialize_app(cred, {
+    'storageBucket': 'vis-p1.firebasestorage.app'
+})
+
+def upload_image(local_path, remote_filename):
+    """Corre en hilo separado para no bloquear el robot"""
+    try:
+        bucket = storage.bucket()
+        blob = bucket.blob(f"detecciones/{remote_filename}")
+        blob.upload_from_filename(local_path)
+        print(f"[CLOUD] Subido: {remote_filename}")
+    except Exception as e:
+        print(f"[CLOUD ERROR] {e}")
+
+def save_and_upload(frame, color_detected):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{color_detected}_{timestamp}.jpg"
+    local_path = f"/tmp/{filename}"
+    
+    # Guardar localmente
+    cv2.imwrite(local_path, frame)
+    
+    # Subir en hilo paralelo (no bloquea)
+    thread = threading.Thread(target=upload_image, args=(local_path, filename))
+    thread.daemon = True
+    thread.start()
 
 UART_port = "/dev/ttyUSB0"
 BAUDRATE = 115200
@@ -63,15 +91,12 @@ def open_serial(port):
         return None
     try:
         s = serial.Serial(port, BAUDRATE, timeout=0.05)
-<<<<<<< HEAD
         # bueno para evitar "pegados" al abrir
         s.reset_input_buffer()
         s.reset_output_buffer()
         print(f"UART abierto: {port} @ {BAUDRATE}")
-=======
         time.sleep(2)  # Esperar reset de Arduino
         print(f"UART abierto: {port}")
->>>>>>> 223a30c98d1c34ad3aebc07f71489ad7636e4dd2
         return s
     except Exception as e:
         print(f"Error abriendo UART {port}: {e}")
@@ -130,7 +155,6 @@ def detect_color(frame_bgr):
 
     return name, bbox, area
 
-<<<<<<< HEAD
 # NUEVO: envio UART controlado
 _last_sent_cmd = None
 _last_sent_t = 0.0
@@ -153,7 +177,6 @@ def send_uart_for_color(color):
             _last_sent_t = t
         except Exception as e:
             print(f"UART write error: {e}")
-=======
 # ✅ CORRECCIÓN 1: Agregar \n y manejar "none"
 def move_GPIOs(color):
     if not port:
@@ -162,11 +185,11 @@ def move_GPIOs(color):
     
     try:
         if color == "white":
-            port.write(b"WHITE\n")  # ← Usar bytes directamente con \n
+            port.write(b"RED\n")  # ← Usar bytes directamente con \n
         elif color == "blue":
             port.write(b"BLUE\n")
         elif color == "red":
-            port.write(b"RED\n")
+            port.write(b"WHITE\n") # está al revés por como se conectaron los motores
         elif color == "green":
             port.write(b"GREEN\n")
         elif color == "none":
@@ -176,15 +199,11 @@ def move_GPIOs(color):
     except Exception as e:
         print(f"Error enviando comando: {e}")
 
->>>>>>> 223a30c98d1c34ad3aebc07f71489ad7636e4dd2
 
 def annotate(frame, color, bbox, area, stable_count):
     out = frame.copy()
     move = MOVE_BY_COLOR.get(color, "—")
-<<<<<<< HEAD
-=======
     # ✅ NO llamar move_GPIOs aquí - se llama en main()
->>>>>>> 223a30c98d1c34ad3aebc07f71489ad7636e4dd2
 
     txt1 = f"Color: {color} | Area: {int(area)} | Stable: {stable_count}"
     txt2 = f"Movimiento: {move}"
@@ -239,12 +258,10 @@ def main():
                 last_color = color
                 stable_count = 1
 
-<<<<<<< HEAD
         # decision: solo cuando ya es estable
         decided_color = "none"
         if stable_count >= STABLE_FRAMES:
             decided_color = last_color
-=======
         # ✅ CORRECCIÓN 3: Enviar comando solo cuando cambia y es estable
         if stable_count >= STABLE_FRAMES:
             if color != last_sent_color:
@@ -257,7 +274,6 @@ def main():
             move_GPIOs("none")
             last_sent_color = "none"
             print(f"[COMANDO] Enviado: STOP (perdida de estabilidad)")
->>>>>>> 223a30c98d1c34ad3aebc07f71489ad7636e4dd2
 
         # enviar UART SOLO si cambia la decision (o STOP si se perdio)
         if decided_color != last_decided_color:
@@ -276,6 +292,7 @@ def main():
 
             annotated = annotate(frame, decided_color, bbox, area, stable_count)
             cv2.imwrite(path, annotated)
+            save_and_upload(annotated, decided_color)  # subir a la nube
             print(f"[CAPTURA] Guardada: {path}")
             last_save_t = t
 
