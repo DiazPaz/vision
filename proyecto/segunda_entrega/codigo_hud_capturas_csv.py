@@ -126,9 +126,9 @@ GPIO_ENB = 13   # Motor derecho – enable (PWM)
 
 # Frecuencia del PWM (Hz) y velocidades
 PWM_FREQ          = 1000    # 1 kHz es suficiente para motores DC genéricos
-VELOCIDAD_NORMAL  = 70      # % duty cycle para movimientos puros  (0-100)
-VELOCIDAD_DIAGONAL_RAPIDO = 70   # motor "dominante" en diagonal
-VELOCIDAD_DIAGONAL_LENTO  = 35   # motor "secundario" en diagonal (giro suave)
+VELOCIDAD_NORMAL  = 40      # % duty cycle para movimientos puros  (0-100)
+VELOCIDAD_DIAGONAL_RAPIDO = 40   # motor "dominante" en diagonal
+VELOCIDAD_DIAGONAL_LENTO  = 25   # motor "secundario" en diagonal (giro suave)
 
 # Objetos PWM globales (se inicializan en inicializar_gpio)
 _pwm_ena = None
@@ -378,25 +378,16 @@ def limpiar_gpio():
 # Referencias por color
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REF_PATHS = {
-    "Rojo": os.path.join(BASE_DIR, "ref_rojo.jpg"),
     "Verde": os.path.join(BASE_DIR, "ref_verde.jpg"),
-    "Azul": os.path.join(BASE_DIR, "ref_azul.jpg")
 }
 
 # =============================================================================
 # RANGOS HSV (ajustar según iluminación real)
 # =============================================================================
 HSV_RANGES = {
-    "Rojo": [
-        (np.array([0,   120, 70]),  np.array([10,  255, 255])),
-        (np.array([170, 120, 70]),  np.array([180, 255, 255]))
-    ],
     "Verde": [
         (np.array([40,  70,  60]),  np.array([85,  255, 255]))
     ],
-    "Azul": [
-        (np.array([100, 120, 80]),  np.array([125, 255, 255]))
-    ]
 }
 
 KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
@@ -406,7 +397,7 @@ KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
 # =============================================================================
 tracked_objects  = {}
 next_object_id   = 1
-color_id_count   = {"Rojo": 0, "Verde": 0, "Azul": 0}
+color_id_count   = {"Verde": 0}
 
 # [GPIO] Ya no se necesitan last_uart_cmd / last_uart_time.
 # El GPIO actúa inmediatamente; no hay protocolo serial que respetar.
@@ -434,7 +425,6 @@ def crear_detector_y_matcher():
 def extraer_features(detector, imagen_gray):
     kp, des = detector.detectAndCompute(imagen_gray, None)
     return kp, des
-
 
 def obtener_metricas_match(matcher, kp_ref, des_ref, kp_roi, des_roi, ratio=0.75):
     metrics = {
@@ -604,9 +594,7 @@ def detectar_cubos(frame_bgr, detector, matcher, referencias):
 def generar_label(color):
     global color_id_count
     color_id_count[color] += 1
-    if color == "Rojo":  return f"R{color_id_count[color]}"
     if color == "Verde": return f"G{color_id_count[color]}"
-    if color == "Azul":  return f"B{color_id_count[color]}"
     return f"OBJ{color_id_count[color]}"
 
 
@@ -791,14 +779,12 @@ def aplicar_comando_gpio(cmd: str):
 # =============================================================================
 
 def color_bgr(nombre):
-    if nombre == "Rojo":  return (0, 0, 255)
     if nombre == "Verde": return (0, 255, 0)
-    if nombre == "Azul":  return (255, 0, 0)
     return (255, 255, 255)
 
 
 def contar_por_color(objetos):
-    conteo = {"Rojo": 0, "Verde": 0, "Azul": 0}
+    conteo = {"Verde": 0}
     for _, obj in objetos.items():
         conteo[obj["color"]] += 1
     return conteo
@@ -925,11 +911,11 @@ def dibujar_resultados(frame, objetos, objetivo_id, instruccion,
     dibujar_hud(frame, objetivo, fps, avg_fps, elapsed_s, estado_hud, zona_hud)
 
     conteo = contar_por_color(objetos)
-    total  = conteo["Rojo"] + conteo["Verde"] + conteo["Azul"]
+    total  = conteo["Verde"]
 
     cv2.putText(frame,
-                f"#R: {conteo['Rojo']}  #G: {conteo['Verde']}  "
-                f"#B: {conteo['Azul']}  #Total: {total}",
+                f"#G: {conteo['Verde']}  "
+                f"#Total: {total}",
                 (20, 455),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
@@ -1122,7 +1108,6 @@ def main():
             fps_hist.append(fps)
             time_hist.append(elapsed_s)
             avg_fps = sum(fps_hist) / len(fps_hist)
-            deque(fps_hist, maxlen=30)
 
             dibujar_resultados(frame, objetos, objetivo_id,
                                instruccion, cmd_gpio, dx, dy,
