@@ -378,7 +378,7 @@ def limpiar_gpio():
 # Referencias por color
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REF_PATHS = {
-    "Rojo": os.path.join(BASE_DIR, "ref_rojo.jpg"),
+    "Rojo": None,
     "Verde": os.path.join(BASE_DIR, "ref_verde.jpg"),
     "Azul": os.path.join(BASE_DIR, "ref_azul.jpg")
 }
