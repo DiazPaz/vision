@@ -66,9 +66,7 @@ except ImportError:
 # =============================================================================
 # CONFIGURACIÓN GENERAL
 # =============================================================================
-CAM_INDEX      = 0
-FRAME_WIDTH    = 640   # ← optimizado: 4× menos píxeles que 1280×720
-FRAME_HEIGHT   = 360
+CAM_INDEX      = 1
 
 RATIO_TEST     = 0.75
 
@@ -114,9 +112,9 @@ GPIO_IN4 = 24
 GPIO_ENB = 13
 
 PWM_FREQ                  = 1000
-VELOCIDAD_NORMAL          = 70
-VELOCIDAD_DIAGONAL_RAPIDO = 70
-VELOCIDAD_DIAGONAL_LENTO  = 35
+VELOCIDAD_NORMAL          = 40
+VELOCIDAD_DIAGONAL_RAPIDO = 40
+VELOCIDAD_DIAGONAL_LENTO  = 25
 
 _pwm_ena = None
 _pwm_enb = None
@@ -261,24 +259,15 @@ def limpiar_gpio():
 # =============================================================================
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 REF_PATHS = {
-    "Rojo":  os.path.join(BASE_DIR, "ref_rojo.jpg"),
     "Verde": os.path.join(BASE_DIR, "ref_verde.jpg"),
-    "Azul":  os.path.join(BASE_DIR, "ref_azul.jpg"),
 }
 
 # =============================================================================
 # RANGOS HSV
 # =============================================================================
 HSV_RANGES = {
-    "Rojo": [
-        (np.array([0,   120, 70]),  np.array([10,  255, 255])),
-        (np.array([170, 120, 70]),  np.array([180, 255, 255])),
-    ],
     "Verde": [
         (np.array([40, 70, 60]),  np.array([85, 255, 255])),
-    ],
-    "Azul": [
-        (np.array([100, 120, 80]), np.array([125, 255, 255])),
     ],
 }
 
@@ -290,7 +279,7 @@ KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 # =============================================================================
 tracked_objects = {}
 next_object_id  = 1
-color_id_count  = {"Rojo": 0, "Verde": 0, "Azul": 0}
+color_id_count  = {"Verde": 0}
 
 _ultimo_cmd_gpio   = None
 _ultimo_cmd_tiempo = 0.0
@@ -589,9 +578,7 @@ def detectar_cubos(frame_bgr, hsv, gray, detector, matcher, referencias):
 def generar_label(color):
     global color_id_count
     color_id_count[color] += 1
-    if color == "Rojo":  return f"R{color_id_count[color]}"
     if color == "Verde": return f"G{color_id_count[color]}"
-    if color == "Azul":  return f"B{color_id_count[color]}"
     return f"OBJ{color_id_count[color]}"
 
 
@@ -733,12 +720,12 @@ def aplicar_comando_gpio(cmd: str):
 # =============================================================================
 
 def color_bgr(nombre):
-    return {"Rojo": (0, 0, 255), "Verde": (0, 255, 0), "Azul": (255, 0, 0)}.get(
+    return {"Verde": (0, 255, 0)}.get(
         nombre, (255, 255, 255))
 
 
 def contar_por_color(objetos):
-    c = {"Rojo": 0, "Verde": 0, "Azul": 0}
+    c = {"Verde": 0}
     for o in objetos.values():
         c[o["color"]] += 1
     return c
@@ -769,17 +756,16 @@ def dibujar_hud(frame, objetivo, fps, avg_fps, elapsed_s, estado_hud, zona_hud):
     cv2.rectangle(frame, (x0, y0), (x1, y1), (20, 20, 20), -1)
     cv2.rectangle(frame, (x0, y0), (x1, y1), (255, 255, 255), 1)
 
-    matches      = objetivo["matches"]      if objetivo else 0
-    inliers      = objetivo["inliers"]      if objetivo else 0
-    inlier_ratio = objetivo["inlier_ratio"] if objetivo else 0.0
+#     matches      = objetivo["matches"]      if objetivo else 0
+#    inliers      = objetivo["inliers"]      if objetivo else 0
+#     inlier_ratio = objetivo["inlier_ratio"] if objetivo else 0.0
     etiqueta     = objetivo["label"]        if objetivo else "-"
 
     lineas = [
-        f"Estado: {estado_hud}",
+#         f"Estado: {estado_hud}",
         f"Objetivo: {etiqueta}",
         f"T: {elapsed_s:5.1f}/{TEST_DURATION_SECONDS}s",
         f"FPS: {fps:.1f}  Prom: {avg_fps:.1f}",
-        f"M:{matches} I:{inliers} R:{inlier_ratio:.2f}",
         f"Zona: {zona_hud}",
     ]
     y = y0 + 16
@@ -807,7 +793,7 @@ def dibujar_resultados(frame, objetos, objetivo_id,
         c      = color_bgr(obj["color"])
         grosor = 3 if obj_id == objetivo_id else 1
         cv2.rectangle(frame, (x, y), (x + bw, y + bh), c, grosor)
-        texto = f'{obj["label"]} M:{obj["matches"]} I:{obj["inliers"]}'
+        texto = f'{obj["label"]}'
         if obj_id == objetivo_id:
             texto += " [OBJ]"
         cv2.putText(frame, texto, (x, y - 6),
@@ -841,7 +827,7 @@ def dibujar_resultados(frame, objetos, objetivo_id,
     conteo = contar_por_color(objetos)
     total  = sum(conteo.values())
     cv2.putText(frame,
-                f"#R:{conteo['Rojo']} #G:{conteo['Verde']} #B:{conteo['Azul']} T:{total}",
+                f"#G:{conteo['Verde']} T:{total}",
                 (10, h - 18),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
     cv2.putText(frame, "q=Salir", (10, h - 6),
@@ -862,7 +848,6 @@ def crear_csv_session(path_csv):
     writer.writerow([
         "frame_idx", "elapsed_s", "fps", "avg_fps", "num_objetos",
         "target_id", "target_label", "target_color", "target_status",
-        "target_matches", "target_inliers", "target_inlier_ratio",
         "dx_px", "dy_px", "zona_central", "cmd_gpio", "capture_path",
     ])
     return csv_file, writer
@@ -924,8 +909,7 @@ def main():
 
     # ── Abrir cámara ────────────────────────────────────────────────────────
     cap = cv2.VideoCapture(CAM_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+
     # Reducir buffer interno de OpenCV para evitar frames stale
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
@@ -1035,7 +1019,6 @@ def main():
                 objetivo_data["status"]       if objetivo_data else "SIN OBJETIVO",
                 objetivo_data["matches"]      if objetivo_data else 0,
                 objetivo_data["inliers"]      if objetivo_data else 0,
-                f"{objetivo_data['inlier_ratio']:.4f}" if objetivo_data else "0.0000",
                 dx, dy,
                 "DENTRO" if objetivo_en_zona else ("FUERA" if objetivo_data else "N/A"),
                 cmd_gpio,
