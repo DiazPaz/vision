@@ -4,7 +4,7 @@ import os
 import time
 
 # ================= CONFIG =================
-TEMPLATE_PATH = r"pza.png"
+TEMPLATE_PATH = r"vision\Screenshot 2026-03-23 134024.png"
 
 CAM_INDEX = 0
 FRAME_W, FRAME_H = 640, 480
