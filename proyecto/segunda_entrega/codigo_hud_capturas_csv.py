@@ -204,8 +204,8 @@ def mover_adelante(velocidad=VELOCIDAD_NORMAL):
     if not GPIO_DISPONIBLE:
         print("[GPIO-SIM] mover_adelante()")
         return
-    _set_motor_izquierdo(True,  velocidad)
-    _set_motor_derecho(True,    velocidad)
+    _set_motor_izquierdo(False,  velocidad)
+    _set_motor_derecho(False,    velocidad)
 
 
 def mover_atras(velocidad=VELOCIDAD_NORMAL):
@@ -213,8 +213,8 @@ def mover_atras(velocidad=VELOCIDAD_NORMAL):
     if not GPIO_DISPONIBLE:
         print("[GPIO-SIM] mover_atras()")
         return
-    _set_motor_izquierdo(False, velocidad)
-    _set_motor_derecho(False,   velocidad)
+    _set_motor_izquierdo(True, velocidad)
+    _set_motor_derecho(True,   velocidad)
 
 
 def girar_izquierda(velocidad=VELOCIDAD_NORMAL):
