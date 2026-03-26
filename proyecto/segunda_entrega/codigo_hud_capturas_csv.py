@@ -57,8 +57,8 @@ except ImportError:
 # CONFIGURACIÓN GENERAL
 # =============================================================================
 CAM_INDEX      = 0
-FRAME_WIDTH    = 1280
-FRAME_HEIGHT   = 720        # 720p recomendado por el entregable
+FRAME_WIDTH    = 640
+FRAME_HEIGHT   = 360        # 720p recomendado por el entregable
 
 RATIO_TEST     = 0.75       # Ratio test de Lowe
 
@@ -422,7 +422,7 @@ GPIO_CMD_DEBOUNCE   = 0.08   # segundos mínimos entre cambios de comando
 
 def crear_detector_y_matcher():
     detector = cv2.ORB_create(
-        nfeatures=1500,
+        nfeatures=500,
         scaleFactor=1.2,
         nlevels=8,
         fastThreshold=15
@@ -824,9 +824,8 @@ def dibujar_hud(frame, objetivo, fps, avg_fps, elapsed_s, estado_hud, zona_hud):
     x0, y0 = 20, 210
     x1, y1 = 405, 430
 
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), (20, 20, 20), -1)
-    cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+    cv2.rectangle(frame, (x0, y0), (x1, y1), (20, 20, 20), -1)
+    cv2.addWeighted(frame, 0.65, frame, 0.35, 0, frame)
     cv2.rectangle(frame, (x0, y0), (x1, y1), (255, 255, 255), 1)
 
     matches     = objetivo["matches"]      if objetivo else 0
@@ -1123,6 +1122,7 @@ def main():
             fps_hist.append(fps)
             time_hist.append(elapsed_s)
             avg_fps = sum(fps_hist) / len(fps_hist)
+            deque(fps_hist, maxlen=30)
 
             dibujar_resultados(frame, objetos, objetivo_id,
                                instruccion, cmd_gpio, dx, dy,
