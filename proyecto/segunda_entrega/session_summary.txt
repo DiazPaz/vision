@@ -1,0 +1,9 @@
+=== RESUMEN DE SESION ===
+Duracion registrada: 0.01 s
+Frames procesados: 1
+FPS promedio: 0.00
+Capturas automaticas: 0
+Resolucion configurada: 1280x720
+Control: GPIO directo (sin UART/Arduino)
+Meta FPS >= 15: NO CUMPLE
+Nota: si no se alcanzan 15 FPS, documenta la justificacion tecnica.

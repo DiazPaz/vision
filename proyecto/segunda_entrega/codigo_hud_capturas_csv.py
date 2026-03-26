@@ -57,8 +57,8 @@ except ImportError:
 # CONFIGURACIÓN GENERAL
 # =============================================================================
 CAM_INDEX      = 0
-FRAME_WIDTH    = 640
-FRAME_HEIGHT   = 360        # 720p recomendado por el entregable
+FRAME_WIDTH    = 1280
+FRAME_HEIGHT   = 720        # 720p recomendado por el entregable
 
 RATIO_TEST     = 0.75       # Ratio test de Lowe
 
@@ -378,7 +378,7 @@ def limpiar_gpio():
 # Referencias por color
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REF_PATHS = {
-    "Rojo": os.path.join(BASE_DIR, "ref_rojo.jpg"),
+    "Rojo": None,
     "Verde": os.path.join(BASE_DIR, "ref_verde.jpg"),
     "Azul": os.path.join(BASE_DIR, "ref_azul.jpg")
 }
@@ -387,10 +387,7 @@ REF_PATHS = {
 # RANGOS HSV (ajustar según iluminación real)
 # =============================================================================
 HSV_RANGES = {
-    "Rojo": [
-        (np.array([0,   120, 70]),  np.array([10,  255, 255])),
-        (np.array([170, 120, 70]),  np.array([180, 255, 255]))
-    ],
+    "Rojo": None,
     "Verde": [
         (np.array([40,  70,  60]),  np.array([85,  255, 255]))
     ],
@@ -1071,8 +1068,9 @@ def main():
     csv_file, csv_writer = crear_csv_session(SESSION_CSV_PATH)
 
     cap = cv2.VideoCapture(CAM_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+
 
     if not cap.isOpened():
         csv_file.close()
@@ -1122,7 +1120,6 @@ def main():
             fps_hist.append(fps)
             time_hist.append(elapsed_s)
             avg_fps = sum(fps_hist) / len(fps_hist)
-            deque(fps_hist, maxlen=30)
 
             dibujar_resultados(frame, objetos, objetivo_id,
                                instruccion, cmd_gpio, dx, dy,

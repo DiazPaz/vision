@@ -1,0 +1,4 @@
+=== EVENT LOG ===
+[2026-03-26 11:56:16] Inicio de sesion
+[2026-03-26 11:57:13] Salida solicitada por teclado
+[2026-03-26 11:57:14] Fin de sesion

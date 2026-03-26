@@ -1,0 +1,1 @@
+frame_idx,elapsed_s,fps,avg_fps,num_objetos,target_id,target_label,target_color,target_status,target_matches,target_inliers,target_inlier_ratio,dx_px,dy_px,zona_central,cmd_gpio,capture_path
