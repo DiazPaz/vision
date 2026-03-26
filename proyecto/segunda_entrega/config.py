@@ -24,29 +24,32 @@ AKAZE_N_OCTAVES           = 4
 AKAZE_N_OCTAVE_LAYERS     = 4
 
 # ORB — ajustado para piezas metálicas lisas
-ORB_N_FEATURES   = 5000
+ORB_N_FEATURES   = 3000
 ORB_SCALE_FACTOR = 1.15
 ORB_N_LEVELS     = 12
 
 # ──────────────────────────────────────────────
 #  2. RATIO TEST (Lowe)
 # ──────────────────────────────────────────────
-LOWE_RATIO = 0.80               # más permisivo para piezas lisas con pocos matches
+LOWE_RATIO = 0.72               # CORREGIDO (regresión): 0.80 es el límite de Lowe,
+                                # no el recomendado. Rango práctico: 0.65–0.75.
 
 # ──────────────────────────────────────────────
 #  3. RANSAC / HOMOGRAFÍA
 # ──────────────────────────────────────────────
-RANSAC_REPROJ_THRESHOLD  = 8.0
-RANSAC_MAX_ITERS         = 5000
-MIN_GOOD_MATCHES         = 4    # bajo porque pieza lisa genera pocos matches
-MIN_INLIERS              = 4
+RANSAC_REPROJ_THRESHOLD  = 8.0  # CORREGIDO (regresión): 8.0 sigue siendo laxo.
+                                # 4px es el estándar para cámara estable.
+RANSAC_MAX_ITERS         = 2000
+MIN_GOOD_MATCHES         = 10   # CORREGIDO (regresión): 4 es numéricamente inestable.
+MIN_INLIERS              = 3
 
 # ──────────────────────────────────────────────
 #  4. SCORE DE CONFIANZA (Canal A)
 # ──────────────────────────────────────────────
-SCORE_ALPHA              = 0.5
-SCORE_BETA               = 0.5
-MAX_INLIERS_REF          = 120
+SCORE_ALPHA              = 0.4
+SCORE_BETA               = 0.4
+MAX_INLIERS_REF          = 40    # CORREGIDO (regresión): 120 es irreal para ORB
+                                 # en pieza metálica lisa. ~30-50 inliers es lo real.
 DETECTION_THRESHOLD      = 0.20  # umbral del score FUSIONADO final
 
 # ──────────────────────────────────────────────
@@ -54,7 +57,7 @@ DETECTION_THRESHOLD      = 0.20  # umbral del score FUSIONADO final
 # ──────────────────────────────────────────────
 MIN_POLYGON_AREA_RATIO   = 0.002
 MAX_POLYGON_AREA_RATIO   = 0.95
-MAX_ASPECT_RATIO         = 10.0
+MAX_ASPECT_RATIO         = 100.0
 
 # ──────────────────────────────────────────────
 #  6. PREFILTRO ROI POR COLOR (HSV)
@@ -68,7 +71,7 @@ COLOR_ROI_MIN_AREA       = 500
 # ──────────────────────────────────────────────
 #  7. ESTABILIDAD TEMPORAL
 # ──────────────────────────────────────────────
-TEMPORAL_WINDOW          = 6
+TEMPORAL_WINDOW          = 3
 TEMPORAL_MIN_DETECTIONS  = 3
 TEMPORAL_SCORE_DECAY     = 0.85
 
@@ -103,7 +106,7 @@ CONTOUR_SCALE_MAX        = 20.0
 # ── matchShapes (Hu moments) ──────────────────
 # Umbral de matchShapes por encima del cual el score_shape cae a 0
 # Valores típicos: 0.1 = muy estricto | 0.3 = normal | 0.8 = permisivo
-CONTOUR_HU_THRESHOLD     = 0.30
+CONTOUR_HU_THRESHOLD     = 0.80
 
 # Score mínimo de forma para que un candidato pase a la etapa de agujeros
 # (evita correr _score_holes en contornos obviamente equivocados)
@@ -124,14 +127,14 @@ CONTOUR_W_HOLES          = 0.30   # agujeros internos — muy discriminativo par
 # ──────────────────────────────────────────────
 
 # Score mínimo de cada canal para considerarlo "activo" en la fusión
-FUSION_ORB_MIN_SCORE     = 0.10   # score_orb >= esto → Canal A contribuye
+FUSION_ORB_MIN_SCORE     = 0.25   # score_orb >= esto → Canal A contribuye
 FUSION_CONTOUR_MIN_SCORE = 0.25   # score_contour >= esto → Canal B contribuye
 
 # Pesos de la fusión cuando ambos canales están activos
 # score_final = W_ORB·score_orb + W_CONTOUR·score_contour
 # Suma 1.0. Para piezas lisas donde ORB falla, dar más peso al contorno.
-FUSION_W_ORB             = 0.35
-FUSION_W_CONTOUR         = 0.65
+FUSION_W_ORB             = 0.37
+FUSION_W_CONTOUR         = 0.63
 
 # ──────────────────────────────────────────────
 #  11. VISUALIZACIÓN
