@@ -375,10 +375,12 @@ def limpiar_gpio():
 # =============================================================================
 # REFERENCIAS POR COLOR
 # =============================================================================
+# Referencias por color
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REF_PATHS = {
-    "Rojo":  r"VirtualEnv/Vision computacional/ref_rojo.jpg",
-    "Verde": r"VirtualEnv/Vision computacional/ref_verde.jpg",
-    "Azul":  r"VirtualEnv/Vision computacional/ref_azul.jpg"
+    "Rojo": os.path.join(BASE_DIR, "ref_rojo.jpg"),
+    "Verde": os.path.join(BASE_DIR, "ref_verde.jpg"),
+    "Azul": os.path.join(BASE_DIR, "ref_azul.jpg")
 }
 
 # =============================================================================
