@@ -116,7 +116,6 @@ SESSION_SUMMARY_PATH = "session_summary.txt"
 #    - No conectes motores de >600 mA directamente sin disipador en el L298N.
 #    - Nivel lógico del RPi es 3.3 V; el L298N acepta desde 2.3 V → compatible.
 #
-
 GPIO_IN1 = 17   # Motor izquierdo – dirección A
 GPIO_IN2 = 27   # Motor izquierdo – dirección B
 GPIO_ENA = 12   # Motor izquierdo – enable (PWM)
