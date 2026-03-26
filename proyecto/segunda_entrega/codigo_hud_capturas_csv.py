@@ -387,7 +387,9 @@ REF_PATHS = {
 # RANGOS HSV (ajustar según iluminación real)
 # =============================================================================
 HSV_RANGES = {
-    "Rojo": None,
+    "Rojo": [
+        (np.array([170,  120,  70]),  np.array([180,  255, 255]))
+        ],
     "Verde": [
         (np.array([40,  70,  60]),  np.array([85,  255, 255]))
     ],
